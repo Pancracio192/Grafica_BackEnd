@@ -10,28 +10,30 @@ from io import BytesIO
 from skimage import io
 
 app = Flask(__name__)
-CORS(app)  # Permite peticiones desde otros orígenes (frontend)
+CORS(app)
 
-# Mapea categorías numéricas a nombres de carpeta
 category_map = {
     0: "alegria",
     1: "tristeza",
     2: "enojo"
 }
 
+color_map = ["rojo", "azul", "verde"]
+
 UPLOAD_FOLDER = "uploads"
 
-# Asegura que las carpetas existan
-for folder in category_map.values():
-    os.makedirs(os.path.join(UPLOAD_FOLDER, folder), exist_ok=True)
+for emotion in category_map.values():
+    for color in color_map:
+        os.makedirs(os.path.join(UPLOAD_FOLDER, emotion, color), exist_ok=True)
 
 @app.route('/save-drawing', methods=['POST'])
 def save_drawing():
     data = request.get_json()
     image_data = data.get('image')
     category = data.get('category')
+    color = data.get('color') 
 
-    if not image_data or category not in category_map:
+    if not image_data or category not in category_map or color not in color_map:
         return jsonify({"error": "Datos inválidos"}), 400
 
     prefix = "data:image/png;base64,"
@@ -45,79 +47,100 @@ def save_drawing():
     except Exception:
         return jsonify({"error": "Error al decodificar la imagen"}), 400
 
-    # ✅ Usa BytesIO del módulo `io`, no de skimage.io
     try:
         image = Image.open(BytesIO(image_bytes)).convert("RGBA")
-        resized_image = image.resize((256, 256))  # Puedes cambiar el tamaño aquí
+        resized_image = image.resize((256, 256))
 
-        folder = category_map[category]
+        emotion_folder = category_map[category]
         filename = f"drawing_{uuid.uuid4().hex}.png"
-        filepath = os.path.join(UPLOAD_FOLDER, folder, filename)
+        # Guardar en: uploads/emocion/color/imagen.png
+        filepath = os.path.join(UPLOAD_FOLDER, emotion_folder, color, filename)
 
         resized_image.save(filepath, format="PNG")
     except Exception as e:
         return jsonify({"error": f"Error al procesar la imagen: {str(e)}"}), 500
 
-    return jsonify({"message": "Imagen guardada", "filename": filename})
+    return jsonify({
+        "message": "Imagen guardada", 
+        "filename": filename,
+        "emotion": emotion_folder,
+        "color": color
+    })
 
 @app.route('/prepare', methods=['GET'])
 def prepare_dataset():
     images = []
-    categories = ["alegria", "tristeza", "enojo"]
-    labels = []
+    labels_emotion = []
+    labels_color = []
 
-    for category in categories:
-        filelist = glob.glob(f'uploads/{category}/*.png')
-        if not filelist:
-            continue
+    for emotion in category_map.values():
+        for color in color_map:
+            folder_path = f'uploads/{emotion}/{color}'
+            filelist = glob.glob(f'{folder_path}/*.png')
+            
+            if not filelist:
+                continue
 
-        images_read = io.concatenate_images(io.imread_collection(filelist))
-        images_read = images_read[:, :, :, 3]  # Extraer canal alfa (transparencia)
-        labels_read = np.array([category] * images_read.shape[0])
+            images_read = io.concatenate_images(io.imread_collection(filelist))
+            images_read = images_read[:, :, :, 3]  # Canal alfa
+            
+            num_images = images_read.shape[0]
+            emotion_labels = np.array([emotion] * num_images)
+            color_labels = np.array([color] * num_images)
 
-        images.append(images_read)
-        labels.append(labels_read)
+            images.append(images_read)
+            labels_emotion.append(emotion_labels)
+            labels_color.append(color_labels)
 
     if images:
         images = np.vstack(images)
-        labels = np.concatenate(labels)
+        labels_emotion = np.concatenate(labels_emotion)
+        labels_color = np.concatenate(labels_color)
+        
+        # Combinar ambas etiquetas en un array 2D
+        labels = np.column_stack((labels_emotion, labels_color))
+        
+        # Guardar X.npy y un solo y.npy con ambas columnas
         np.save('X.npy', images)
-        np.save('y.npy', labels)
+        np.save('y.npy', labels)  # Array 2D: [emoción, color]
+        
         return jsonify({
             "message": "¡Dataset preparado con éxito!",
             "num_images": images.shape[0],
-            "categories": categories
+            "emotions": list(category_map.values()),
+            "colors": color_map
         })
     else:
         return jsonify({
             "error": "No se encontraron imágenes en las carpetas esperadas.",
-            "num_images": 0,
-            "categories": categories
+            "num_images": 0
         }), 404
+    
 @app.route('/X.npy', methods=['GET'])
 def download_X():
     return send_file('./X.npy')
 
 @app.route('/y.npy', methods=['GET'])
-def download_y():
+def download_y_emotion():
     return send_file('./y.npy')
 
 @app.route('/total-images', methods=['GET'])
 def total_images():
     total = 0
-    category_counts = {}
+    breakdown = {}
 
-    for category in category_map.values():
-        folder_path = os.path.join(UPLOAD_FOLDER, category)
-        count = len(glob.glob(os.path.join(folder_path, "*.png")))
-        category_counts[category] = count
-        total += count
+    for emotion in category_map.values():
+        breakdown[emotion] = {}
+        for color in color_map:
+            folder_path = os.path.join(UPLOAD_FOLDER, emotion, color)
+            count = len(glob.glob(os.path.join(folder_path, "*.png")))
+            breakdown[emotion][color] = count
+            total += count
 
     return jsonify({
         "total_images": total,
-        "images_per_category": category_counts
+        "breakdown": breakdown
     })
-
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
