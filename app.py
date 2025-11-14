@@ -54,7 +54,7 @@ def save_drawing():
         filename = f"drawing_{uuid.uuid4().hex}.png"
         filepath = os.path.join(UPLOAD_FOLDER, emotion_folder, color, filename)
 
-        image.save(filepath, format="PNG")  # ✅ Guardar directo (ya es 32x32)
+        image.save(filepath, format="PNG")
     except Exception as e:
         return jsonify({"error": f"Error al procesar la imagen: {str(e)}"}), 500
 
@@ -79,14 +79,22 @@ def prepare_dataset():
             if not filelist:
                 continue
 
-            images_read = io.concatenate_images(io.imread_collection(filelist))
-            images_read = images_read[:, :, :, 3]  # Canal alfa
+            images_in_folder = []
+            for img_path in filelist:
+                img = Image.open(img_path).convert('RGB')
+                img_array = np.array(img)
+                images_in_folder.append(img_array)
             
-            num_images = images_read.shape[0]
+            if not images_in_folder:
+                continue
+            
+            images_array = np.stack(images_in_folder)
+            num_images = images_array.shape[0]
+            
             emotion_labels = np.array([emotion] * num_images)
             color_labels = np.array([color] * num_images)
 
-            images.append(images_read)
+            images.append(images_array)
             labels_emotion.append(emotion_labels)
             labels_color.append(color_labels)
 
@@ -95,22 +103,21 @@ def prepare_dataset():
         labels_emotion = np.concatenate(labels_emotion)
         labels_color = np.concatenate(labels_color)
         
-        # Combinar ambas etiquetas en un array 2D
         labels = np.column_stack((labels_emotion, labels_color))
         
-        # Guardar X.npy y un solo y.npy con ambas columnas
         np.save('X.npy', images)
-        np.save('y.npy', labels)  # Array 2D: [emoción, color]
+        np.save('y.npy', labels)
         
         return jsonify({
             "message": "¡Dataset preparado con éxito!",
             "num_images": images.shape[0],
+            "image_shape": list(images.shape),
             "emotions": list(category_map.values()),
             "colors": color_map
         })
     else:
         return jsonify({
-            "error": "No se encontraron imágenes en las carpetas esperadas.",
+            "error": "No se encontraron imágenes",
             "num_images": 0
         }), 404
     
