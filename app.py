@@ -49,14 +49,12 @@ def save_drawing():
 
     try:
         image = Image.open(BytesIO(image_bytes)).convert("RGBA")
-        resized_image = image.resize((256, 256))
 
         emotion_folder = category_map[category]
         filename = f"drawing_{uuid.uuid4().hex}.png"
-        # Guardar en: uploads/emocion/color/imagen.png
         filepath = os.path.join(UPLOAD_FOLDER, emotion_folder, color, filename)
 
-        resized_image.save(filepath, format="PNG")
+        image.save(filepath, format="PNG")  # ✅ Guardar directo (ya es 32x32)
     except Exception as e:
         return jsonify({"error": f"Error al procesar la imagen: {str(e)}"}), 500
 
