@@ -51,6 +51,8 @@ def cargar_modelos():
     except Exception as e:
         print(f"No se pudo cargar modelo pre-entrenado: {e}")
 
+cargar_modelos()
+
 @app.route('/save-drawing', methods=['POST'])
 def save_drawing():
     data = request.get_json()
@@ -234,7 +236,6 @@ def predict():
 
 
 if __name__ == "__main__":
-    cargar_modelos()
     port = int(os.environ.get("PORT", 5000))
     app.run(debug=True, host='0.0.0.0', port=port)
 
